@@ -260,10 +260,10 @@ class GadgetInspectionSession:
 
     def _buildUrl(self, suffix) -> str:
         # A helper function to help local debugging.
-        localServerDebugAddress = "192.168.1.3"
+        localServerDebugAddress = None
         if localServerDebugAddress is not None:
             return "http://" + localServerDebugAddress + suffix
-        return ""
+        return "https://gadget-api.octoeverywhere.com" + suffix
 
 
     def _tryParseApiErrorResponse(self, response: requests.Response):

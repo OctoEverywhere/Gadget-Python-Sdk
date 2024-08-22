@@ -25,4 +25,5 @@ jobs:
 
     - name: Analyzing the code with PYLint
       run: |
+        pylint example.py
         pylint ./gadgetsdk/

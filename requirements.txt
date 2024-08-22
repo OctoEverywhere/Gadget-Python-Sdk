@@ -1,0 +1,2 @@
+# Simple requirements for the Gadget SDK
+requests>=2.31.0

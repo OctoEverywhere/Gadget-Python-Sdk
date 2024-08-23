@@ -263,7 +263,7 @@ class GadgetInspectionSession:
         localServerDebugAddress = None
         if localServerDebugAddress is not None:
             return "http://" + localServerDebugAddress + suffix
-        return "https://gadget-api.octoeverywhere.com" + suffix
+        return "https://gadget-pv1-oeapi.octoeverywhere.com" + suffix
 
 
     def _tryParseApiErrorResponse(self, response: requests.Response):

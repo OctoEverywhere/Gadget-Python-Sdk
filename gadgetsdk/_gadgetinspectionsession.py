@@ -20,7 +20,9 @@ class GadgetInspectionSession:
         minProcessingIntervalSec:int = 0,
         on_new_image_request:  Callable[[None], bytes] = None,
         on_state_update:       Callable[[int, bool, bool], None] = None,
-        on_error:              Callable[[str, str], None] = None
+        on_error:              Callable[[str, str], None] = None,
+        warningConfidenceLevel:int = None,
+        pauseConfidenceLevel:  int = None,
     ) -> None:
         """
         GadgetInspectionSession Initialization
@@ -40,24 +42,41 @@ class GadgetInspectionSession:
 
         on_state_update: function(score:int, warningSuggested:bool, pauseSuggested:bool) -> None
             Callback after an image process when there's a new model state.
-            score:int - A value between 0 and 100, 0 is a perfect print and 100 being a very strong likely hood of failure.
-            warningSuggested:bool - Set to True if the OctoEverywhere temporal combination algorithm suggests a warning should be fired.
-            pauseSuggested:bool   - Set to True if the OctoEverywhere temporal combination algorithm suggests the print should be paused due to failure.
+            score:int - This is the temporal combination model print quality score.
+                        The score ranges from 0-100. 0 indicates a perfect print and 100 indicates a strong probability of a failure.
+                        You can use this score directly to indicate the current print quality to the user.
+            warningSuggested:bool - Set to true if the temporal combination model is confident there might be a print issue and the user should be informed.
+                                    This decision is based on many signals and is only sent when there's high confidence of the warning state.
+            pauseSuggested:bool   - Set to true if the temporal combination model is confident that there is probably a print failure and that the print should be paused.
+                                    This decision is based on many signals and is only sent when there's high confidence that the print has failed.
 
         on_error: function(errorType:str, errorDetails:str) -> None
             Callback for when an error occurs.
             errorType:str    - One of the well known errors as described in the API documentation.
             errorDetails:str - A string with more information about the error.
+
+        warningConfidenceLevel: int = None
+            This adjusts the temporal combination model's required confidence in a failure to trigger the warning suggestion.
+            The value must be between 1-5, where 1 is the least confident (more warnings) and 5 is the most confident (less warnings).
+            If not set, the default value of 3 will be used.
+
+        pauseConfidenceLevel: int = None
+            This adjusts the temporal combination model's required confidence in a failure to trigger the pause print suggestion.
+            The value must be between 1-5, where 1 is the least confident (will pause with less confidence) and 5 is the most confident (will only pause when very confident).
+            If not set, the default value of 3 will be used.
         """
         self.apiKey = apiKey
         self.on_new_image_request = on_new_image_request
         self.on_state_update = on_state_update
         self.on_error = on_error
         self.minProcessingIntervalSec = minProcessingIntervalSec
+        self.warningConfidenceLevel = warningConfidenceLevel
+        self.pauseConfidenceLevel = pauseConfidenceLevel
         self.thread:threading.Thread = None
         self.threadLock = threading.Lock()
         self.hasRan = False
         self.isRunning = False
+        self.isPaused = False
         self.UseFallbackUrl = False
 
         # Ensure the required values are set.
@@ -69,6 +88,10 @@ class GadgetInspectionSession:
             raise Exception("on_state_update must be provided.")
         if self.minProcessingIntervalSec < 0:
             raise Exception("minProcessingIntervalSec must be a positive number or zero.")
+        if self.warningConfidenceLevel is not None and (self.warningConfidenceLevel < 1 or self.warningConfidenceLevel > 5):
+            raise Exception("warningConfidenceLevel must be between 1 and 5.")
+        if self.pauseConfidenceLevel is not None and (self.pauseConfidenceLevel < 1 or self.pauseConfidenceLevel > 5):
+            raise Exception("pauseConfidenceLevel must be between 1 and 5.")
 
         # Session Context Information
         # This is the ID of this context we use to identify the session.
@@ -79,13 +102,15 @@ class GadgetInspectionSession:
         self.ProcessRequestFallbackUrl:str = None
 
         # This is the min amount of time we must sleep as requested from the process API
+        # This value can be updated by the Process API on each response, but we clamp it by minProcessingIntervalSec.
         self.SleepIntervalSec = 60
-
+        self._sanityCheckAndSetProcessingInterval(60)
 
 
     def start(self) -> None:
         """
-        Start the inspection session.
+        Starts the inspection session on an async thread.
+        After this is called, a context will be created and the call backs will start firing.
         """
         with self.threadLock:
             if self.hasRan is True:
@@ -96,9 +121,26 @@ class GadgetInspectionSession:
             self.thread.start()
 
 
+    def pause(self) -> None:
+        """
+        Pauses the session from processing new images, and thus pauses the API calls.
+        This is useful for temporally stopping the session without stopping it, like if a failure is detected.
+        """
+        with self.threadLock:
+            self.isPaused = True
+
+
+    def resume(self) -> None:
+        """
+        Resumes the session. The session will start processing new images again and start firing the callbacks for data.
+        """
+        with self.threadLock:
+            self.isPaused = False
+
+
     def stop(self) -> None:
         """
-        Stop the inspection session.
+        Stop the inspection session. Once the session is stopped, it can't be started again, a new session must be created.
         """
         with self.threadLock:
             if self.thread is not None:
@@ -111,29 +153,31 @@ class GadgetInspectionSession:
         # Once we are running, we will keep running until the session is stopped.
         while self.isRunning:
             try:
-                # Ensure we have a context.
-                if not self._ensureSessionContext():
-                    # If we failed to create a context, we will sleep for a bit and try again.
-                    time.sleep(30)
-                    continue
+                # If we are paused, we will skip processing, we will just sleep the last requested time interval and check again.
+                if self.isPaused is False:
 
-                # If we have a context, we can now process a new image.
-                imageBytes = None
-                try:
-                    imageBytes = self.on_new_image_request()
-                except Exception as e:
-                    self._fireOnError(GadgetInspectionSession.ErrorTypeCallbackFailure, str(e))
+                    # Ensure we have a context.
+                    if not self._ensureSessionContext():
+                        # If we failed to create a context, we will sleep for a bit and try again.
+                        time.sleep(30)
+                        continue
 
-                # If the client returns none we skip this processing.
-                if imageBytes is not None:
-                    self._processImage(imageBytes)
+                    # If we have a context, we can now process a new image.
+                    imageBytes = None
+                    try:
+                        imageBytes = self.on_new_image_request()
+                    except Exception as e:
+                        self._fireOnError(GadgetInspectionSession.ErrorTypeCallbackFailure, str(e))
 
-                # Sleep the next processing time interval.
-                time.sleep(self.SleepIntervalSec)
+                    # If the client returns none we skip this processing.
+                    if imageBytes is not None:
+                        self._processImage(imageBytes)
 
             except Exception as e:
                 self._fireOnError(GadgetInspectionSession.ErrorTypeInternal, str(e))
-                time.sleep(self.SleepIntervalSec)
+
+            # At the end of each loop, regardless of state, always sleep the requested interval.
+            time.sleep(self.SleepIntervalSec)
 
 
     # Ensures there's a session context, if not, one is created.
@@ -145,8 +189,14 @@ class GadgetInspectionSession:
 
         try:
             # If there's no context, create one now.
+            # These value are optional, if they aren't used, the service will use the default value of 3.
+            json = {
+                "WarningConfidenceLevel": self.warningConfidenceLevel,
+                "PauseConfidenceLevel": self.pauseConfidenceLevel
+            }
             response = requests.post(
                 self._buildUrl("/api/gadget/v1/createcontext"),
+                json=json,
                 headers={
                     "X-API-Key": self.apiKey
                 },
@@ -160,7 +210,7 @@ class GadgetInspectionSession:
                 if errorType is not None and errorDetails is not None:
                     self._fireOnError(errorType, errorDetails)
                     return False
-                raise Exception("Failed to create a new session context: " + response.text)
+                raise Exception(f"Failed to create a new session context. Status: {response.status_code}, Body: " + response.text)
 
             # Parse the response.
             # Grab the data we need.
@@ -216,7 +266,7 @@ class GadgetInspectionSession:
                     self.UseFallbackUrl = True
                     self._fireOnError(errorType, errorDetails)
                     return
-                raise Exception("Failed to call process api: " + response.text)
+                raise Exception(f"Failed to call Process API. Status: {response.status_code}, Body: " + response.text)
 
             # Parse the response.
             # Grab the data we need.
@@ -229,8 +279,7 @@ class GadgetInspectionSession:
             # Set the next processing interval.
             if nextProcessIntervalSec is None:
                 raise Exception("Failed to get a valid NextProcessIntervalSec from process API response.")
-            self.SleepIntervalSec = max(nextProcessIntervalSec, self.minProcessingIntervalSec)
-            self._sanityCheckProcessingInterval()
+            self._sanityCheckAndSetProcessingInterval(nextProcessIntervalSec)
 
             # Validate the results
             if score is None:
@@ -252,10 +301,15 @@ class GadgetInspectionSession:
             self._fireOnError(GadgetInspectionSession.ErrorTypeInternal, str(e))
 
 
-    def _sanityCheckProcessingInterval(self) -> None:
-        # A helper function to ensure the processing interval is within a reasonable range.
-        self.SleepIntervalSec = max(20, self.SleepIntervalSec)
-        self.SleepIntervalSec = min(3600, self.SleepIntervalSec)
+    def _sanityCheckAndSetProcessingInterval(self, newValueSec:int) -> None:
+        # A helper function to ensure the processing interval is within a reasonable range
+        # and it's clamped by the user provided minProcessingIntervalSec, if it exists.
+        newValueSec = max(20, newValueSec)
+        newValueSec = min(60 * 30, newValueSec)
+        # minProcessingIntervalSec defaults to 0, so if it's not set, it will always be less than the min of 20 we set above.
+        # We do this check after the system min and max checks, to allow the client to set a value outside of the range if desired.
+        newValueSec = max(self.minProcessingIntervalSec, newValueSec)
+        self.SleepIntervalSec = newValueSec
 
 
     def _buildUrl(self, suffix) -> str:

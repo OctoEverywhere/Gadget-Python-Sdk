@@ -43,9 +43,13 @@ class GadgetInspectionSession:
         on_state_update: function(score:int, warningSuggested:bool, pauseSuggested:bool) -> None
             Callback after an image process when there's a new model state.
 
+            For full details on the parameters, see the API documentation.
+            https://octoeverywhere.stoplight.io/docs/octoeverywhere-api-docs/hb9xvo995a4px-process
+
             printQuality:int  - This is the temporal combination model print quality score.
                                 The print score rates your current print out of 10, where 10 is perfect.
-                                This value is used for showing the user the current print quality.
+                                DO NOT USE for warning or pause actions.
+                                This value should be used to show the current print stats to the user on a UI, printer display, etc.
                                 The values can be interrupted as:
                                     1. There's a print failure
                                     2. There's probably a print failure
@@ -61,7 +65,8 @@ class GadgetInspectionSession:
                                     This decision is based on many signals and is only sent when there's high confidence that the print has failed.
             score:int - This is the temporal combination model raw score.
                         The score ranges from 0-100. 0 indicates a perfect print, and 100 indicates a strong probability of a failure.
-                        This is a raw score that's useful if you want to programmatically interrupt the AI score to possibly run smoothing algorithms or such.
+                        DO NOT USE this value for showing print quality or taking actions.
+                        This value can be used to programmatically interrupt the AI score for advanced processing such as smoothing, aggregation, or such.
 
         on_error: function(errorType:str, errorDetails:str) -> None
             Callback for when an error occurs.
@@ -72,11 +77,13 @@ class GadgetInspectionSession:
             This adjusts the temporal combination model's required confidence in a failure to trigger the warning suggestion.
             The value must be between 1-5, where 1 is the least confident (more warnings) and 5 is the most confident (less warnings).
             If not set, the default value of 3 will be used.
+            Full details: https://octoeverywhere.stoplight.io/docs/octoeverywhere-api-docs/kgomtjwkt3dj9-create-context
 
         pauseConfidenceLevel: int = None
             This adjusts the temporal combination model's required confidence in a failure to trigger the pause print suggestion.
             The value must be between 1-5, where 1 is the least confident (will pause with less confidence) and 5 is the most confident (will only pause when very confident).
             If not set, the default value of 3 will be used.
+            Full details: https://octoeverywhere.stoplight.io/docs/octoeverywhere-api-docs/kgomtjwkt3dj9-create-context
         """
         self.apiKey = apiKey
         self.on_new_image_request = on_new_image_request

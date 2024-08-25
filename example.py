@@ -58,10 +58,13 @@ class Example:
 
     def OnStateUpdate(self, printQuality:int, warningSuggested:bool, pauseSuggested:bool, score:int) -> None:
         # Called after an image process when there's a new model state.
+        # For full details on the parameters, see the API documentation.
+        # https://octoeverywhere.stoplight.io/docs/octoeverywhere-api-docs/hb9xvo995a4px-process
         #
         # printQuality:int -  This is the temporal combination model print quality score.
         #                     The print score rates your current print out of 10, where 10 is perfect.
-        #                     This value is used for showing the user the current print quality.
+        #                     DO NOT USE for warning or pause actions.
+        #                     This value should be used to show the current print stats to the user on a UI, printer display, etc.
         #                     The values can be interrupted as:
         #                       1. There's a print failure
         #                       2. There's probably a print failure
@@ -76,7 +79,8 @@ class Example:
         #                         This decision is based on many signals and is only sent when there's high confidence that the print has failed.
         # score:int - This is the temporal combination model raw score.
         #                The score ranges from 0-100. 0 indicates a perfect print, and 100 indicates a strong probability of a failure.
-        #                This is a raw score that's useful if you want to programmatically interrupt the AI score to possibly run smoothing algorithms or such.
+        #                DO NOT USE this value for showing print quality or taking actions.
+        #                This value can be used to programmatically interrupt the AI score for advanced processing such as smoothing, aggregation, or such.
         print(f"Image processing complete. New State - Print Quality: {printQuality}, Warning: {warningSuggested}, Pause: {pauseSuggested}, Score: {score}")
 
         # Here's an example how how you might want to update your UI based on the print quality.

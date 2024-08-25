@@ -19,7 +19,7 @@ class GadgetInspectionSession:
         apiKey: str,
         minProcessingIntervalSec:int = 0,
         on_new_image_request:  Callable[[None], bytes] = None,
-        on_state_update:       Callable[[int, bool, bool], None] = None,
+        on_state_update:       Callable[[int, bool, bool, int], None] = None,
         on_error:              Callable[[str, str], None] = None,
         warningConfidenceLevel:int = None,
         pauseConfidenceLevel:  int = None,
@@ -42,13 +42,26 @@ class GadgetInspectionSession:
 
         on_state_update: function(score:int, warningSuggested:bool, pauseSuggested:bool) -> None
             Callback after an image process when there's a new model state.
-            score:int - This is the temporal combination model print quality score.
-                        The score ranges from 0-100. 0 indicates a perfect print and 100 indicates a strong probability of a failure.
-                        You can use this score directly to indicate the current print quality to the user.
+
+            printQuality:int  - This is the temporal combination model print quality score.
+                                The print score rates your current print out of 10, where 10 is perfect.
+                                This value is used for showing the user the current print quality.
+                                The values can be interrupted as:
+                                    1. There's a print failure
+                                    2. There's probably a print failure
+                                    3. There might be a print failure
+                                    4-5. Monitoring a possible print issue
+                                    6-7. Good print quality
+                                    8-9. Great print quality
+                                    10. Perfect print quality
+
             warningSuggested:bool - Set to true if the temporal combination model is confident there might be a print issue and the user should be informed.
                                     This decision is based on many signals and is only sent when there's high confidence of the warning state.
             pauseSuggested:bool   - Set to true if the temporal combination model is confident that there is probably a print failure and that the print should be paused.
                                     This decision is based on many signals and is only sent when there's high confidence that the print has failed.
+            score:int - This is the temporal combination model raw score.
+                        The score ranges from 0-100. 0 indicates a perfect print, and 100 indicates a strong probability of a failure.
+                        This is a raw score that's useful if you want to programmatically interrupt the AI score to possibly run smoothing algorithms or such.
 
         on_error: function(errorType:str, errorDetails:str) -> None
             Callback for when an error occurs.
@@ -272,9 +285,10 @@ class GadgetInspectionSession:
             # Grab the data we need.
             responseJson = response.json()
             nextProcessIntervalSec = responseJson.get("NextProcessIntervalSec", None)
-            score = responseJson.get("Score", None)
+            printQuality = responseJson.get("PrintQuality", None)
             warningSuggested = responseJson.get("WarningSuggested", None)
             pauseSuggested = responseJson.get("PauseSuggested", None)
+            score = responseJson.get("Score", None)
 
             # Set the next processing interval.
             if nextProcessIntervalSec is None:
@@ -284,6 +298,8 @@ class GadgetInspectionSession:
             # Validate the results
             if score is None:
                 raise Exception("Failed to get a valid Score from process API response.")
+            if printQuality is None:
+                raise Exception("Failed to get a valid PrintQuality from process API response.")
             if warningSuggested is None:
                 raise Exception("Failed to get a valid WarningSuggested from process API response.")
             if pauseSuggested is None:
@@ -291,7 +307,7 @@ class GadgetInspectionSession:
 
             # Fire the state update callback.
             try:
-                self.on_state_update(score, warningSuggested, pauseSuggested)
+                self.on_state_update(printQuality, warningSuggested, pauseSuggested, score)
             except Exception as e:
                 self._fireOnError(GadgetInspectionSession.ErrorTypeCallbackFailure, str(e))
 

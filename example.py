@@ -56,34 +56,44 @@ class Example:
         return self._getImage(True)
 
 
-    def OnStateUpdate(self, score:int, warningSuggested:bool, pauseSuggested:bool) -> None:
+    def OnStateUpdate(self, printQuality:int, warningSuggested:bool, pauseSuggested:bool, score:int) -> None:
         # Called after an image process when there's a new model state.
         #
-        # score:int - This is the temporal combination model print quality score.
-        #             The score ranges from 0-100. 0 indicates a perfect print and 100 indicates a strong probability of a failure.
-        #             You can use this score directly to indicate the current print quality to the user.
+        # printQuality:int -  This is the temporal combination model print quality score.
+        #                     The print score rates your current print out of 10, where 10 is perfect.
+        #                     This value is used for showing the user the current print quality.
+        #                     The values can be interrupted as:
+        #                       1. There's a print failure
+        #                       2. There's probably a print failure
+        #                       3. There might be a print failure
+        #                       4-5. Monitoring a possible print issue
+        #                       6-7. Good print quality
+        #                       8-9. Great print quality
+        #                       10. Perfect print quality
         # warningSuggested:bool - Set to true if the temporal combination model is confident there might be a print issue and the user should be informed.
         #                         This decision is based on many signals and is only sent when there's high confidence of the warning state.
         # pauseSuggested:bool   - Set to true if the temporal combination model is confident that there is probably a print failure and that the print should be paused.
         #                         This decision is based on many signals and is only sent when there's high confidence that the print has failed.
-        #
-        print(f"Image processing complete. New State - Score: {score}, Warning: {warningSuggested}, Pause: {pauseSuggested}")
+        # score:int - This is the temporal combination model raw score.
+        #                The score ranges from 0-100. 0 indicates a perfect print, and 100 indicates a strong probability of a failure.
+        #                This is a raw score that's useful if you want to programmatically interrupt the AI score to possibly run smoothing algorithms or such.
+        print(f"Image processing complete. New State - Print Quality: {printQuality}, Warning: {warningSuggested}, Pause: {pauseSuggested}, Score: {score}")
 
-        # Here's an example how how you might want to update the state of print on a UI the user can see.
-        if score >= 99:
-            print("Print Status: Issue Detected")
-        elif score >= 97:
-            print("Print Status: There's Probably An Issue")
-        elif score >= 95:
-            print("Print Status: There Might An Issue")
-        elif score >= 80:
-            print("Print Status: Possible Issue")
-        elif score >= 60:
-            print("Print Status: Monitoring A Possible Issue")
-        elif score >= 30:
-            print("Print Status: Looking Good")
-        else:
-            print("Print Status: Looking Great")
+        # Here's an example how how you might want to update your UI based on the print quality.
+        if printQuality == 1:
+            print("Your Print Has Failed!")
+        elif printQuality == 2:
+            print("There's Probably A Print Failure")
+        elif printQuality == 3:
+            print("There Might Be A Print Failure")
+        elif printQuality == 4 or printQuality == 5:
+            print("Monitoring A Possible Print Issue")
+        elif printQuality == 6 or printQuality == 7:
+            print("Good Print Quality")
+        elif printQuality == 8 or printQuality == 9:
+            print("Great Print Quality")
+        elif printQuality == 10:
+            print("Perfect Print Quality")
 
         # If a warning is suggested, you can inform the user on the UI or by sending them a message.
         if warningSuggested:
